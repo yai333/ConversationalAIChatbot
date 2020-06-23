@@ -26,7 +26,7 @@ character = [
 ]
 
 
-def get_chat_histories(userid):
+def get_chat_history(userid):
     response = dynamodb.get_item(TableName=TABLE_NAME, Key={
         'userid': {
             'S': userid
@@ -37,7 +37,7 @@ def get_chat_histories(userid):
     return {"history": []}
 
 
-def save_chat_histories(userid, history):
+def save_chat_history(userid, history):
     return dynamodb.put_item(TableName=TABLE_NAME, Item={'userid': {'S': userid}, 'history': {'S': history}})
 
 
@@ -109,7 +109,7 @@ def interact(raw_text, model, personality, userid, history):
     history.append(out_ids)
     history = history[-(2 * args["max_history"] + 1):]
     out_text = tokenizer.decode(out_ids, skip_special_tokens=True)
-    save_chat_histories(userid, json.dumps({"history": history}))
+    save_chat_history(userid, json.dumps({"history": history}))
     return out_text
 
 
@@ -117,7 +117,7 @@ def lambda_handler(event, context):
     try:
         userid = event['userid']
         message = event['message']
-        history = get_chat_histories(userid)
+        history = get_chat_history(userid)
         history = history["history"]
         response_msg = interact(message, convAimodel,
                                 character, userid, history)
