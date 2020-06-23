@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  lambdaEFSChatBot
+
+Parameters:
+  TableName:
+    Type: String
+    Default: DialogHistory
+Globals:
+  Function:
+    Timeout: 900
+    MemorySize: 3008
+
+Resources:
+  HelloFunction:
+    Type: AWS::Serverless::Function
+    DependsOn:
+      - LibAccessPointResource
+    Properties:
+      Environment:
+        Variables:
+          CHAT_HISTORY_TABLE: !Ref TableName
+      Role: !GetAtt LambdaRole.Arn
+      CodeUri: src/
+      Handler: api.lambda_handler
+      Runtime: python3.6
+      FileSystemConfigs:
+        - Arn: !GetAtt LibAccessPointResource.Arn
+          LocalMountPath: "/mnt/libs"
+      VpcConfig:
+        SecurityGroupIds:
+          - "{{resolve:ssm:/root/defaultVPC/securityGroup:1}}"
+        SubnetIds:
+          - "{{resolve:ssm:/root/defaultVPC/subsetA:1}}"
+          - "{{resolve:ssm:/root/defaultVPC/subsetB:1}}"
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "efsAPILambdaRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AWSLambdaExecute"
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+        - "arn:aws:iam::aws:policy/AmazonElasticFileSystemClientFullAccess"
+      Policies:
+        - PolicyName: "efsAPIRoleDBAccess"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                  - "dynamodb:GetItem"
+                  - "dynamodb:UpdateItem"
+                  - "dynamodb:DeleteItem"
+                  - "dynamodb:Query"
+                  - "dynamodb:Scan"
+                Resource:
+                  - !GetAtt ChatHistory.Arn
+                  - Fn::Join:
+                      - "/"
+                      - - !GetAtt ChatHistory.Arn
+                        - "*"
+              - Effect: Allow
+                Action:
+                  - "ssm:GetParameter*"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/root/defaultVPC*"
+  ChatHistory:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableName
+      AttributeDefinitions:
+        - AttributeName: userid
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userid
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+  FileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      PerformanceMode: generalPurpose
+      FileSystemTags:
+        - Key: Name
+          Value: fs-pylibs
+  MountTargetA:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId:
+        Ref: FileSystem
+      SubnetId: "{{resolve:ssm:/root/defaultVPC/subsetA:1}}"
+      SecurityGroups:
+        - "{{resolve:ssm:/root/defaultVPC/securityGroup:1}}"
+  MountTargetB:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId:
+        Ref: FileSystem
+      SubnetId: "{{resolve:ssm:/root/defaultVPC/subsetB:1}}"
+      SecurityGroups:
+        - "{{resolve:ssm:/root/defaultVPC/securityGroup:1}}"
+  LibAccessPointResource:
+    Type: "AWS::EFS::AccessPoint"
+    DependsOn:
+      - FileSystem
+      - MountTargetA
+      - MountTargetB
+    Properties:
+      FileSystemId:
+        Ref: FileSystem
+      PosixUser:
+        Uid: "1000"
+        Gid: "1000"
+      RootDirectory:
+        CreationInfo:
+          OwnerGid: "1000"
+          OwnerUid: "1000"
+          Permissions: "0777"
+        Path: "/"
